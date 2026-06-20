@@ -27,6 +27,8 @@ class OllamaProvider:
         display_name: str,
         topic: str = "general",
         language: str = "en",
+        has_media: bool = False,
+        skills_context: str = "",
     ) -> List[str]:
         """
         Generate reply drafts using local Ollama model.
@@ -37,6 +39,8 @@ class OllamaProvider:
             display_name: Tweet author's display name
             topic: Topic category for context
             language: 'en' or 'id' for prompt language
+            has_media: Whether the tweet contains media
+            skills_context: Context about user skills
 
         Returns:
             List of 1-3 reply strings, or empty list on failure
@@ -47,6 +51,8 @@ class OllamaProvider:
             tweet_text=tweet_text,
             topic=topic,
             language=language,
+            has_media=has_media,
+            skills_context=skills_context,
         )
 
         try:
@@ -89,9 +95,9 @@ class OllamaProvider:
             logger.error(f"Ollama error: {type(e).__name__}: {e}")
             return []
 
-    async def generate_post(self) -> str:
+    async def generate_post(self, trend_context: str = "", skills_context: str = "") -> str:
         """Generate a single engaging auto-post draft using Ollama."""
-        from ai.prompts import AUTO_POST_PROMPT_ID
+        from ai.prompts import get_auto_post_prompt
 
         try:
             import asyncio
@@ -100,7 +106,7 @@ class OllamaProvider:
             response = await asyncio.to_thread(
                 ollama.generate,
                 model=self.model,
-                prompt=AUTO_POST_PROMPT_ID,
+                prompt=get_auto_post_prompt(trend_context, skills_context),
                 options={
                     "temperature": 0.8,
                     "num_ctx": 2048,
@@ -115,6 +121,66 @@ class OllamaProvider:
             return raw_text.strip().strip('"').strip("'")
         except Exception as e:
             logger.error(f"Ollama error generating post: {e}")
+            return ""
+
+    async def analyze_trends(self, tweets_text: str) -> str:
+        """Analyze trending tweets using Ollama."""
+        from ai.prompts import TREND_ANALYSIS_PROMPT
+        try:
+            import asyncio
+            import ollama
+            
+            prompt = TREND_ANALYSIS_PROMPT.format(tweets=tweets_text)
+            response = await asyncio.to_thread(
+                ollama.generate,
+                model=self.model,
+                prompt=prompt,
+                options={"temperature": 0.3, "num_ctx": 4096},
+            )
+            raw_text = response.get("response", "")
+            return raw_text.strip() if raw_text else ""
+        except Exception as e:
+            logger.error(f"Ollama error analyzing trends: {e}")
+            return ""
+
+    async def analyze_timeline(self, tweets_text: str) -> str:
+        """Analyze timeline tweets using Ollama."""
+        from ai.prompts import TIMELINE_ANALYSIS_PROMPT
+        try:
+            import asyncio
+            import ollama
+            
+            prompt = TIMELINE_ANALYSIS_PROMPT.format(tweets=tweets_text)
+            response = await asyncio.to_thread(
+                ollama.generate,
+                model=self.model,
+                prompt=prompt,
+                options={"temperature": 0.3, "num_ctx": 4096},
+            )
+            raw_text = response.get("response", "")
+            return raw_text.strip() if raw_text else ""
+        except Exception as e:
+            logger.error(f"Ollama error analyzing timeline: {e}")
+            return ""
+
+    async def analyze_post_mortem(self, post_text: str, likes: int, replies: int) -> str:
+        """Analyze post performance using Ollama."""
+        from ai.prompts import POST_MORTEM_PROMPT
+        try:
+            import asyncio
+            import ollama
+            
+            prompt = POST_MORTEM_PROMPT.format(post_text=post_text, likes=likes, replies=replies)
+            response = await asyncio.to_thread(
+                ollama.generate,
+                model=self.model,
+                prompt=prompt,
+                options={"temperature": 0.3, "num_ctx": 2048},
+            )
+            raw_text = response.get("response", "")
+            return raw_text.strip() if raw_text else ""
+        except Exception as e:
+            logger.error(f"Ollama error analyzing post-mortem: {e}")
             return ""
 
     async def is_available(self) -> bool:

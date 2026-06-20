@@ -39,6 +39,9 @@ from browser.session import BrowserSessionManager
 from browser.scraper import TweetScraper
 from browser.poster import ReplyPoster
 from ai.generator import ReplyGenerator
+from ai.trend_analyzer import TrendAnalyzer
+from ai.skill_manager import SkillManager
+from ai.post_mortem import PostMortemAnalyzer
 from telegram_bot.bot import ApprovalBot
 
 # ── Logging Setup ───────────────────────────────────────────────────
@@ -110,6 +113,10 @@ class EngagementAgent:
         self.poster: ReplyPoster | None = None
         self.ai: ReplyGenerator | None = None
         self.telegram_bot: ApprovalBot | None = None
+        self.trend_analyzer: TrendAnalyzer | None = None
+        self.skill_manager: SkillManager | None = None
+        self.post_mortem: PostMortemAnalyzer | None = None
+        self.current_trend_context: str = ""
         self._shutdown_event = asyncio.Event()
         self._browser_lock = asyncio.Lock()
         # When set, other loops must pause (auto-post is using the browser)
@@ -156,6 +163,9 @@ class EngagementAgent:
         self.scraper = TweetScraper(page, self.settings)
         self.poster = ReplyPoster(page, self.settings)
         self.ai = ReplyGenerator(self.settings)
+        self.skill_manager = SkillManager()
+        self.trend_analyzer = TrendAnalyzer(self.scraper, self.ai, self.skill_manager)
+        self.post_mortem = PostMortemAnalyzer(self.scraper, self.ai, self.skill_manager)
 
         # AI health check
         ai_status = await self.ai.health_check()
@@ -177,7 +187,13 @@ class EngagementAgent:
             "atau /scrape_once untuk 1x cycle."
         )
 
-        # ── 7. Main loop ───────────────────────────────────────────
+        # ── 7. Initial Persona Learning ──────────────────────────────
+        skills = self.skill_manager.get_skills()
+        if "[PERSONA]" not in skills:
+            logger.info("🧠 Initializing: No persona found in SKILLS.md. Learning from past replies...")
+            await self.trend_analyzer.learn_persona_from_past_replies()
+
+        # ── 8. Main loop ───────────────────────────────────────────
         logger.info("🔄 Entering main loop (scraping OFF by default)")
         logger.info("   Send /scrape_on in Telegram to start")
 
@@ -186,11 +202,18 @@ class EngagementAgent:
                 self._main_loop(),
                 self._notifications_loop(),
                 self._auto_post_loop(),
+                self._trend_analysis_loop(),
+                self._post_mortem_loop(),
             )
         except asyncio.CancelledError:
             logger.info("Main loop cancelled")
         finally:
             await self._shutdown()
+
+    async def _check_session_locked(self) -> bool:
+        """Lock-protected session validation."""
+        async with self._browser_lock:
+            return await self.browser.is_session_valid()
 
     async def _main_loop(self):
         """
@@ -230,7 +253,9 @@ class EngagementAgent:
                     continue
 
                 # ── Validate session periodically ───────────────────
-                if not await self.browser.is_session_valid():
+                async with self._browser_lock:
+                    session_valid = await self.browser.is_session_valid()
+                if not session_valid:
                     logger.error("❌ Session invalid!")
                     await self.telegram_bot.send_alert(
                         "❌ X session invalid! Login ulang diperlukan.\n"
@@ -356,22 +381,38 @@ class EngagementAgent:
         interval_mins = self.settings.engagement.auto_post_interval_minutes
         logger.info(f"🤖 Auto-post loop starting... Interval: {interval_mins} mins")
         
-        # Initial delay to let the browser and other loops settle
-        await asyncio.sleep(30)
+        # Wait for trend analysis to complete on startup
+        logger.info("⏳ Waiting for initial trend analysis to finish before first auto-post...")
+        for _ in range(180): # Wait up to 3 minutes
+            if self.current_trend_context or self._shutdown_event.is_set():
+                break
+            await asyncio.sleep(1)
         
         while not self._shutdown_event.is_set():
             try:
-                if not await self.browser.is_session_valid():
+                if not await self._check_session_locked():
                     await asyncio.sleep(10)
                     continue
 
-                # 1. Generate a new post draft
-                logger.info("📝 Generating new auto-post draft...")
+                # 1. Generate a new post draft (using skills + trends)
+                logger.info("📝 Generating new auto-post draft (Autonomous Mode)...")
                 draft = await self._generate_new_post_draft()
                 if draft:
-                    # 2. Send to Telegram for approval
-                    await self.telegram_bot.send_auto_post_approval_request(draft)
-                    await db.log_activity("auto_post_drafted", "Sent to Telegram for approval")
+                    # 2. AUTONOMOUS: Post directly to X, bypassing Telegram
+                    logger.info("🤖 Autonomously posting to X...")
+                    success, post_url = await self._create_new_post_locked(draft)
+                    
+                    if success:
+                        await db.save_auto_post(draft, post_url)
+                        await db.log_activity("auto_post_published", f"URL: {post_url}")
+                        # Inform Telegram that we posted (FYI only)
+                        await self.telegram_bot.send_status(
+                            f"🤖 <b>Autonomous Auto-Post Published!</b>\n\n"
+                            f"🔗 <a href='{post_url}'>Lihat Post</a>\n"
+                            f"💬 <i>\"{draft}\"</i>"
+                        )
+                    else:
+                        logger.error("Failed to publish autonomous post.")
                 else:
                     logger.error("Failed to generate auto-post draft")
 
@@ -388,6 +429,76 @@ class EngagementAgent:
                 raise
             except Exception as e:
                 logger.error(f"Error in auto-post loop: {e}")
+                await asyncio.sleep(60)
+
+    async def _trend_analysis_loop(self):
+        """Background loop to periodically analyze X trends to enrich auto-posts."""
+        if not self.settings.engagement.auto_post_enabled:
+            return
+
+        interval_hours = 6
+        logger.info(f"📈 Trend analysis loop starting... Interval: {interval_hours} hours")
+
+        while not self._shutdown_event.is_set():
+            try:
+                if not await self._check_session_locked():
+                    await asyncio.sleep(10)
+                    continue
+
+                logger.info("🔍 Running scheduled trend analysis...")
+                async with self._browser_lock:
+                    # Learn niche from timeline
+                    await self.trend_analyzer.learn_from_timeline()
+                    # Analyze general trends
+                    new_context = await self.trend_analyzer.analyze_current_trends()
+                
+                if new_context:
+                    self.current_trend_context = new_context
+                    logger.info("✅ Trend context updated successfully.")
+
+                # Wait for interval
+                logger.info(f"⏰ Trend analysis loop sleeping for {interval_hours} hours")
+                
+                # Sleep in smaller chunks to be responsive to shutdown
+                for _ in range(interval_hours * 3600):
+                    if self._shutdown_event.is_set():
+                        return
+                    await asyncio.sleep(1)
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Error in trend analysis loop: {e}")
+                await asyncio.sleep(60)
+
+    async def _post_mortem_loop(self):
+        """Background loop to periodically analyze past auto-posts for learnings."""
+        if not self.settings.engagement.auto_post_enabled:
+            return
+
+        interval_hours = 4
+        logger.info(f"🔬 Post-mortem loop starting... Interval: {interval_hours} hours")
+
+        while not self._shutdown_event.is_set():
+            try:
+                if not await self._check_session_locked():
+                    await asyncio.sleep(10)
+                    continue
+
+                async with self._browser_lock:
+                    await self.post_mortem.run_post_mortem()
+
+                logger.info(f"⏰ Post-mortem loop sleeping for {interval_hours} hours")
+                
+                for _ in range(interval_hours * 3600):
+                    if self._shutdown_event.is_set():
+                        return
+                    await asyncio.sleep(1)
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Error in post-mortem loop: {e}")
                 await asyncio.sleep(60)
 
     async def _run_homepage_scrape_cycle(self):
@@ -490,6 +601,7 @@ class EngagementAgent:
                 tweet.to_dict(),
                 topic=query,
                 language="id",
+                skills_context=self.skill_manager.get_skills(),
             )
 
             if not drafts:
@@ -560,23 +672,28 @@ class EngagementAgent:
         logger.info(f"📝 Posting approved reply to: {tweet_url}")
         return await self.poster.post_reply(tweet_url, reply_text)
 
-    async def _create_new_post_locked(self, post_text: str) -> bool:
+    async def _create_new_post_locked(self, post_text: str) -> tuple[bool, str]:
         """Lock-protected wrapper for creating a new post. Pauses other loops."""
         self._auto_post_busy.set()
         try:
-            # Give ongoing browser operations a moment to finish
             await asyncio.sleep(2)
             async with self._browser_lock:
                 if not self.poster:
-                    logger.error("Poster not initialized")
-                    return False
+                    return False, ""
                 return await self.poster.create_new_post(post_text)
         finally:
             self._auto_post_busy.clear()
 
     async def _generate_new_post_draft(self) -> str:
-        """Callback to generate a new post draft."""
-        draft, _ = await self.ai.generate_post()
+        """Callback to generate a new post draft using trends and SKILLS.md."""
+        skills = self.skill_manager.get_skills()
+        combined_context = (
+            f"--- KEAHLIAN & NICHE YANG DIPELAJARI (SKILLS.md) ---\n"
+            f"{skills}\n\n"
+            f"--- TREN SAAT INI ---\n"
+            f"{self.current_trend_context}"
+        )
+        draft, _ = await self.ai.generate_post(combined_context)
         return draft
 
     def _is_active_hours(self) -> bool:

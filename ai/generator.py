@@ -49,6 +49,7 @@ class ReplyGenerator:
         tweet_data: Dict[str, Any],
         topic: str = "general",
         language: str = "en",
+        skills_context: str = "",
     ) -> tuple[List[str], str]:
         """
         Generate reply drafts for a tweet.
@@ -56,9 +57,10 @@ class ReplyGenerator:
         Tries Gemini first, then Ollama as fallback.
 
         Args:
-            tweet_data: Dict with keys: tweet_text, username, author_name
+            tweet_data: Dict with keys: tweet_text, username, author_name, has_media
             topic: Topic category for prompt context
             language: 'en' or 'id'
+            skills_context: Learnings to guide persona
 
         Returns:
             Tuple of (list of reply strings, provider name used).
@@ -67,28 +69,13 @@ class ReplyGenerator:
         tweet_text = tweet_data.get("tweet_text", "")
         username = tweet_data.get("username", "")
         display_name = tweet_data.get("author_name", username)
+        has_media = tweet_data.get("has_media", False)
 
         if not tweet_text:
             logger.warning("Cannot generate replies for empty tweet text")
             return [], ""
 
-        # --- Try Gemini first ---
-        if self._gemini and self._gemini.is_available():
-            logger.info("Attempting reply generation with Gemini...")
-            replies = await self._gemini.generate_replies(
-                tweet_text=tweet_text,
-                username=username,
-                display_name=display_name,
-                topic=topic,
-                language=language,
-            )
-            if replies:
-                logger.info(f"✅ Gemini generated {len(replies)} drafts")
-                return replies, "gemini"
-            else:
-                logger.warning("Gemini failed, trying fallback...")
-
-        # --- Fallback to Ollama ---
+        # --- Use Ollama Only ---
         if self._ollama:
             if await self._ollama.is_available():
                 logger.info("Attempting reply generation with Ollama...")
@@ -100,6 +87,7 @@ class ReplyGenerator:
                     language=language,
                 )
                 if replies:
+                    replies = [f"{r} - A" for r in replies]
                     logger.info(f"✅ Ollama generated {len(replies)} drafts")
                     return replies, "ollama"
                 else:
@@ -107,32 +95,48 @@ class ReplyGenerator:
             else:
                 logger.warning("Ollama server not available for fallback")
 
-        # --- Both failed ---
-        logger.error("❌ All AI providers failed to generate replies")
+        # --- Failed ---
+        logger.error("❌ Ollama failed to generate replies")
         return [], ""
 
-    async def generate_post(self) -> tuple[str, str]:
+    async def generate_post(self, trend_context: str = "", skills_context: str = "") -> tuple[str, str]:
         """
         Generate a single auto-post draft.
         Returns (draft_text, provider_name). Returns ("", "") on failure.
         """
-        if self._gemini and self._gemini.is_available():
-            logger.info("Attempting post generation with Gemini...")
-            draft = await self._gemini.generate_post()
-            if draft:
-                logger.info("✅ Gemini generated post draft")
-                return draft, "gemini"
-
-        # Fallback to Ollama if implemented
         if self._ollama and await self._ollama.is_available():
             if hasattr(self._ollama, "generate_post"):
                 logger.info("Attempting post generation with Ollama...")
-                draft = await self._ollama.generate_post()
+                draft = await self._ollama.generate_post(trend_context, skills_context)
                 if draft:
                     return draft, "ollama"
 
-        logger.error("❌ All AI providers failed to generate post draft")
+        logger.error("❌ Ollama failed to generate post draft")
         return "", ""
+
+    async def analyze_trends(self, tweets_text: str) -> str:
+        """Analyze trending tweets."""
+        if self._gemini and self._gemini.is_available():
+            res = await self._gemini.analyze_trends(tweets_text)
+            if res: return res
+        
+        return ""
+
+    async def analyze_timeline(self, tweets_text: str) -> str:
+        """Analyze timeline tweets to deduce niche."""
+        if self._gemini and self._gemini.is_available():
+            res = await self._gemini.analyze_timeline(tweets_text)
+            if res: return res
+        
+        return ""
+
+    async def analyze_post_mortem(self, post_text: str, likes: int, replies: int) -> str:
+        """Analyze successful post."""
+        if self._gemini and self._gemini.is_available():
+            res = await self._gemini.analyze_post_mortem(post_text, likes, replies)
+            if res: return res
+            
+        return ""
 
     async def health_check(self) -> Dict[str, bool]:
         """Check availability of all configured providers."""

@@ -97,7 +97,7 @@ class ReplyPoster:
             await self._take_debug_screenshot("post_error")
             return False
 
-    async def create_new_post(self, post_text: str, max_retries: int = 3) -> bool:
+    async def create_new_post(self, post_text: str, max_retries: int = 3) -> tuple[bool, str]:
         """
         Open compose modal via sidebar button and post a new tweet.
 
@@ -108,7 +108,7 @@ class ReplyPoster:
             max_retries: Number of retry attempts.
 
         Returns:
-            True if successful, False otherwise.
+            Tuple of (success_boolean, post_url_if_any).
         """
         for attempt in range(1, max_retries + 1):
             logger.info(f"📝 Creating new auto-post (attempt {attempt}/{max_retries})...")
@@ -164,12 +164,30 @@ class ReplyPoster:
                     if attempt < max_retries:
                         await asyncio.sleep(5)
                         continue
-                    return False
+                    return False, ""
 
                 # Wait for confirmation
                 await self._random_delay(3, 5)
                 logger.info("✅ Auto-post published successfully!")
-                return True
+                
+                # Try to fetch the post URL by visiting the profile
+                post_url = ""
+                try:
+                    profile_btn = self.page.locator('a[data-testid="AppTabBar_Profile_Link"]').first
+                    if await profile_btn.count() > 0:
+                        await profile_btn.click()
+                        await self._random_delay(3, 5)
+                        # Find the first status link (should be our new tweet)
+                        first_tweet = self.page.locator('a[href*="/status/"]').first
+                        if await first_tweet.count() > 0:
+                            href = await first_tweet.get_attribute("href")
+                            if href:
+                                post_url = f"https://x.com{href}" if href.startswith("/") else href
+                                logger.info(f"🔗 Retrieved new post URL: {post_url}")
+                except Exception as e:
+                    logger.debug(f"Could not fetch post URL from profile: {e}")
+
+                return True, post_url
 
             except Exception as e:
                 logger.error(f"Error creating new post (attempt {attempt}): {e}")
@@ -178,9 +196,9 @@ class ReplyPoster:
                     logger.info(f"🔄 Retrying in 5 seconds...")
                     await asyncio.sleep(5)
                     continue
-                return False
+                return False, ""
         
-        return False
+        return False, ""
 
     async def _find_reply_box(self) -> Optional[object]:
         """Find the reply text input area on the tweet page."""

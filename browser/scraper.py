@@ -35,6 +35,7 @@ class TweetData:
     retweets: int = 0
     tweet_timestamp: str = ""
     parsed_time: Optional[datetime] = None
+    has_media: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -47,6 +48,7 @@ class TweetData:
             "replies": self.replies,
             "retweets": self.retweets,
             "tweet_timestamp": self.tweet_timestamp,
+            "has_media": self.has_media,
         }
 
 
@@ -93,6 +95,17 @@ class TweetScraper:
 
         return await self._process_scraped_tweets(raw_url_context=search_url)
 
+    async def discover_user_replies(self, username: str) -> List[TweetData]:
+        """Fetch tweets from /{username}/with_replies."""
+        logger.info(f"🔍 Scraping replies for: @{username}")
+        replies_url = f"https://x.com/{username}/with_replies"
+        try:
+            await self.page.goto(replies_url, wait_until="domcontentloaded")
+            return await self._process_scraped_tweets(raw_url_context=replies_url)
+        except Exception as e:
+            logger.error(f"Failed to navigate to user replies: {e}")
+            return []
+
     async def discover_timeline_tweets(self) -> List[TweetData]:
         """Scrape tweets from the For You / Following timeline."""
         logger.info("🏠 Searching tweets on Homepage/Timeline")
@@ -116,7 +129,11 @@ class TweetScraper:
 
         try:
             await self.page.goto("https://x.com/notifications", wait_until="domcontentloaded")
-            await self._random_delay(3, 6)
+            try:
+                await self.page.wait_for_selector('div[data-testid="cellInnerDiv"]', timeout=15000)
+            except Exception:
+                pass
+            await self._random_delay(4, 7)
         except Exception as e:
             logger.error(f"Failed to navigate to notifications: {e}")
             return []
@@ -197,7 +214,11 @@ class TweetScraper:
                     # Click near the top-left corner to avoid accidentally clicking 
                     # user profile <a> links that sit in the center of the text
                     await cells.nth(index).click(position={"x": 10, "y": 10})
-                    await self._random_delay(3, 5)
+                    try:
+                        await self.page.wait_for_selector('article[data-testid="tweet"]', timeout=15000)
+                    except Exception:
+                        pass
+                    await self._random_delay(4, 6)
                     
                     raw_tweets = await self._parse_all_tweets()
                     for tweet in raw_tweets:
@@ -217,8 +238,13 @@ class TweetScraper:
     async def _process_scraped_tweets(self, raw_url_context: str) -> List[TweetData]:
         """Internal helper to scroll, parse, and filter tweets after navigation."""
 
-        # Wait for content to load
-        await self._random_delay(3, 6)
+        # Wait for content to load, ensuring articles are visible if possible
+        try:
+            await self.page.wait_for_selector('article[data-testid="tweet"]', timeout=15000)
+        except Exception:
+            logger.warning("Timeout waiting for tweets to load. Will try to proceed anyway.")
+        
+        await self._random_delay(4, 7)
 
         # Scroll to load more tweets
         scroll_count = random.randint(6, 12)
@@ -377,6 +403,14 @@ class TweetScraper:
             tweet.replies = await self._extract_count(article, sel.REPLY_COUNT_BUTTON)
             tweet.retweets = await self._extract_count(article, sel.RETWEET_COUNT_BUTTON)
             tweet.likes = await self._extract_count(article, sel.LIKE_COUNT_BUTTON)
+
+            # ── Media Check ─────────────────────────────────────────
+            try:
+                media_count = await article.locator('[data-testid="tweetPhoto"], [data-testid="videoPlayer"]').count()
+                if media_count > 0:
+                    tweet.has_media = True
+            except Exception:
+                pass
 
             return tweet
 

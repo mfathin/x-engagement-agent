@@ -71,12 +71,24 @@ CREATE TABLE IF NOT EXISTS activity_log (
     details         TEXT DEFAULT ''
 );
 
+-- Tracks autonomously generated posts to evaluate later
+CREATE TABLE IF NOT EXISTS auto_posts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_text       TEXT NOT NULL,
+    post_url        TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    likes           INTEGER DEFAULT 0,
+    replies         INTEGER DEFAULT 0,
+    analyzed        INTEGER DEFAULT 0 -- 0=false, 1=true
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_tweets_status ON processed_tweets(status);
 CREATE INDEX IF NOT EXISTS idx_tweets_discovered ON processed_tweets(discovered_at);
 CREATE INDEX IF NOT EXISTS idx_replies_tweet ON reply_history(tweet_id);
 CREATE INDEX IF NOT EXISTS idx_replies_status ON reply_history(status);
 CREATE INDEX IF NOT EXISTS idx_activity_timestamp ON activity_log(timestamp);
+CREATE INDEX IF NOT EXISTS idx_auto_posts_analyzed ON auto_posts(analyzed);
 """
 
 

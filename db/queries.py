@@ -196,3 +196,43 @@ async def get_recent_activity(limit: int = 50) -> List[Dict[str, Any]]:
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+
+
+# ── Auto Posts ──────────────────────────────────────────────────────
+
+
+async def save_auto_post(post_text: str, post_url: str = "") -> None:
+    """Save an autonomously generated post."""
+    async with _connect() as db:
+        await db.execute(
+            "INSERT INTO auto_posts (post_text, post_url) VALUES (?, ?)",
+            (post_text, post_url),
+        )
+        await db.commit()
+
+
+async def get_unanalyzed_auto_posts(older_than_hours: int = 12) -> List[Dict[str, Any]]:
+    """Get posts that haven't been analyzed yet and are older than X hours."""
+    threshold = (datetime.now(timezone.utc) - timedelta(hours=older_than_hours)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    async with _connect() as db:
+        cursor = await db.execute(
+            """
+            SELECT * FROM auto_posts 
+            WHERE analyzed = 0 AND created_at <= ? AND post_url != ''
+            """,
+            (threshold,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+async def update_auto_post_analyzed(post_id: int, likes: int, replies: int) -> None:
+    """Mark an auto post as analyzed and save its engagement metrics."""
+    async with _connect() as db:
+        await db.execute(
+            "UPDATE auto_posts SET analyzed = 1, likes = ?, replies = ? WHERE id = ?",
+            (likes, replies, post_id),
+        )
+        await db.commit()

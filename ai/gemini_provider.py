@@ -42,6 +42,8 @@ class GeminiProvider:
         display_name: str,
         topic: str = "general",
         language: str = "en",
+        has_media: bool = False,
+        skills_context: str = "",
     ) -> List[str]:
         """
         Generate reply drafts using Gemini.
@@ -52,6 +54,8 @@ class GeminiProvider:
             display_name: Tweet author's display name
             topic: Topic category for context
             language: 'en' or 'id' for prompt language
+            has_media: Whether the tweet contains media
+            skills_context: User's relevant skills
 
         Returns:
             List of 1-3 reply strings, or empty list on failure
@@ -62,6 +66,8 @@ class GeminiProvider:
             tweet_text=tweet_text,
             topic=topic,
             language=language,
+            has_media=has_media,
+            skills_context=skills_context,
         )
 
         try:
@@ -97,16 +103,17 @@ class GeminiProvider:
             logger.error(f"Gemini API error: {type(e).__name__}: {e}")
             return []
 
-    async def generate_post(self) -> str:
+    async def generate_post(self, trend_context: str = "", skills_context: str = "") -> str:
         """Generate a single engaging auto-post draft."""
-        from ai.prompts import AUTO_POST_PROMPT_ID
+        from ai.prompts import get_auto_post_prompt
         try:
             client = self._get_client()
             import asyncio
+            prompt = get_auto_post_prompt(trend_context, skills_context)
             response = await asyncio.to_thread(
                 client.models.generate_content,
                 model=self.model,
-                contents=AUTO_POST_PROMPT_ID,
+                contents=prompt,
             )
             if not response or not response.text:
                 return ""
@@ -114,6 +121,65 @@ class GeminiProvider:
             return response.text.strip().strip('"').strip("'")
         except Exception as e:
             logger.error(f"Gemini API error generating post: {e}")
+            return ""
+
+    async def analyze_trends(self, tweets_text: str) -> str:
+        """Analyze trending tweets and extract a summary."""
+        from ai.prompts import TREND_ANALYSIS_PROMPT
+        try:
+            client = self._get_client()
+            import asyncio
+            prompt = TREND_ANALYSIS_PROMPT.format(tweets=tweets_text)
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=self.model,
+                contents=prompt,
+            )
+            if not response or not response.text:
+                return ""
+            return response.text.strip()
+        except Exception as e:
+            logger.error(f"Gemini API error analyzing trends: {e}")
+            return ""
+
+    async def analyze_timeline(self, tweets_text: str) -> str:
+        """Analyze timeline tweets to deduce niche."""
+        from ai.prompts import TIMELINE_ANALYSIS_PROMPT
+        try:
+            client = self._get_client()
+            import asyncio
+            prompt = TIMELINE_ANALYSIS_PROMPT.format(tweets=tweets_text)
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=self.model,
+                contents=prompt,
+            )
+            if not response or not response.text:
+                return ""
+            return response.text.strip()
+        except Exception as e:
+            logger.error(f"Gemini API error analyzing timeline: {e}")
+            return ""
+
+    async def analyze_post_mortem(self, post_text: str, likes: int, replies: int) -> str:
+        """Analyze a successful past post."""
+        from ai.prompts import POST_MORTEM_PROMPT
+        try:
+            client = self._get_client()
+            import asyncio
+            prompt = POST_MORTEM_PROMPT.format(
+                post_text=post_text, likes=likes, replies=replies
+            )
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=self.model,
+                contents=prompt,
+            )
+            if not response or not response.text:
+                return ""
+            return response.text.strip()
+        except Exception as e:
+            logger.error(f"Gemini API error in post mortem: {e}")
             return ""
 
     def is_available(self) -> bool:
