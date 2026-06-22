@@ -61,10 +61,11 @@ class GeminiConfig:
 
 
 @dataclass
-class OllamaConfig:
+class TokenRouterConfig:
     enabled: bool = False
-    url: str = "http://localhost:11434"
-    model: str = "llama3"
+    url: str = "https://api.tokenrouter.com/v1"
+    api_key: str = ""
+    model: str = "minimax-m3"
 
 
 @dataclass
@@ -116,7 +117,7 @@ class Settings:
 
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
-    ollama: OllamaConfig = field(default_factory=OllamaConfig)
+    token_router: TokenRouterConfig = field(default_factory=TokenRouterConfig)
     twitter: TwitterConfig = field(default_factory=TwitterConfig)
     engagement: EngagementConfig = field(default_factory=EngagementConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
@@ -141,11 +142,12 @@ class Settings:
             model=_get("GEMINI_MODEL", "gemini-2.5-flash"),
         )
 
-        # Ollama
-        self.ollama = OllamaConfig(
-            enabled=_get_bool("LOCAL_AI_ENABLED"),
-            url=_get("LOCAL_AI_URL", "http://localhost:11434"),
-            model=_get("LOCAL_AI_MODEL", "llama3"),
+        # Token Router
+        self.token_router = TokenRouterConfig(
+            enabled=_get_bool("TOKEN_ROUTER_ENABLED"),
+            url=_get("TOKEN_ROUTER_URL", "https://api.tokenrouter.com/v1"),
+            api_key=_get("TOKEN_ROUTER_API_KEY"),
+            model=_get("TOKEN_ROUTER_MODEL", "minimax-m3"),
         )
 
         # Twitter
@@ -203,10 +205,10 @@ class Settings:
         if self.gemini.enabled and not self.gemini.api_key:
             errors.append("GEMINI_API_KEY is required when GEMINI_ENABLED=true")
 
-        if not self.gemini.enabled and not self.ollama.enabled:
+        if not self.gemini.enabled and not self.token_router.enabled:
             errors.append(
                 "At least one AI provider must be enabled "
-                "(GEMINI_ENABLED or LOCAL_AI_ENABLED)"
+                "(GEMINI_ENABLED or TOKEN_ROUTER_ENABLED)"
             )
 
         if not self.engagement.queries:

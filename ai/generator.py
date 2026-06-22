@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from ai.gemini_provider import GeminiProvider
-from ai.ollama_provider import OllamaProvider
+from ai.token_router_provider import TokenRouterProvider
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ class ReplyGenerator:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._gemini: Optional[GeminiProvider] = None
-        self._ollama: Optional[OllamaProvider] = None
+        self._token_router: Optional[TokenRouterProvider] = None
 
         # Initialize enabled providers
         if settings.gemini.enabled:
@@ -37,12 +37,13 @@ class ReplyGenerator:
             )
             logger.info(f"Gemini provider enabled (model: {settings.gemini.model})")
 
-        if settings.ollama.enabled:
-            self._ollama = OllamaProvider(
-                url=settings.ollama.url,
-                model=settings.ollama.model,
+        if settings.token_router.enabled:
+            self._token_router = TokenRouterProvider(
+                url=settings.token_router.url,
+                api_key=settings.token_router.api_key,
+                model=settings.token_router.model,
             )
-            logger.info(f"Ollama provider enabled (model: {settings.ollama.model})")
+            logger.info(f"Token Router provider enabled (model: {settings.token_router.model})")
 
     async def generate(
         self,
@@ -54,7 +55,7 @@ class ReplyGenerator:
         """
         Generate reply drafts for a tweet.
 
-        Tries Gemini first, then Ollama as fallback.
+        Tries Gemini first, then Token Router as fallback.
 
         Args:
             tweet_data: Dict with keys: tweet_text, username, author_name, has_media
@@ -75,11 +76,11 @@ class ReplyGenerator:
             logger.warning("Cannot generate replies for empty tweet text")
             return [], ""
 
-        # --- Use Ollama Only ---
-        if self._ollama:
-            if await self._ollama.is_available():
-                logger.info("Attempting reply generation with Ollama...")
-                replies = await self._ollama.generate_replies(
+        # --- Use Token Router Only ---
+        if self._token_router:
+            if await self._token_router.is_available():
+                logger.info("Attempting reply generation with Token Router...")
+                replies = await self._token_router.generate_replies(
                     tweet_text=tweet_text,
                     username=username,
                     display_name=display_name,
@@ -88,15 +89,15 @@ class ReplyGenerator:
                 )
                 if replies:
                     replies = [f"{r} - A" for r in replies]
-                    logger.info(f"✅ Ollama generated {len(replies)} drafts")
-                    return replies, "ollama"
+                    logger.info(f"✅ Token Router generated {len(replies)} drafts")
+                    return replies, "token_router"
                 else:
-                    logger.warning("Ollama also failed to generate replies")
+                    logger.warning("Token Router also failed to generate replies")
             else:
-                logger.warning("Ollama server not available for fallback")
+                logger.warning("Token Router server not available for fallback")
 
         # --- Failed ---
-        logger.error("❌ Ollama failed to generate replies")
+        logger.error("❌ Token Router failed to generate replies")
         return [], ""
 
     async def generate_post(self, trend_context: str = "", skills_context: str = "") -> tuple[str, str]:
@@ -104,14 +105,14 @@ class ReplyGenerator:
         Generate a single auto-post draft.
         Returns (draft_text, provider_name). Returns ("", "") on failure.
         """
-        if self._ollama and await self._ollama.is_available():
-            if hasattr(self._ollama, "generate_post"):
-                logger.info("Attempting post generation with Ollama...")
-                draft = await self._ollama.generate_post(trend_context, skills_context)
+        if self._token_router and await self._token_router.is_available():
+            if hasattr(self._token_router, "generate_post"):
+                logger.info("Attempting post generation with Token Router...")
+                draft = await self._token_router.generate_post(trend_context, skills_context)
                 if draft:
-                    return draft, "ollama"
+                    return draft, "token_router"
 
-        logger.error("❌ Ollama failed to generate post draft")
+        logger.error("❌ Token Router failed to generate post draft")
         return "", ""
 
     async def analyze_trends(self, tweets_text: str) -> str:
@@ -147,9 +148,9 @@ class ReplyGenerator:
         else:
             status["gemini"] = False
 
-        if self._ollama:
-            status["ollama"] = await self._ollama.is_available()
+        if self._token_router:
+            status["token_router"] = await self._token_router.is_available()
         else:
-            status["ollama"] = False
+            status["token_router"] = False
 
         return status
