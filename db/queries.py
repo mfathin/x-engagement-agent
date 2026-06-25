@@ -17,7 +17,9 @@ from db.models import get_db_path
 @asynccontextmanager
 async def _connect():
     """Get a database connection."""
-    async with aiosqlite.connect(str(get_db_path())) as db:
+    async with aiosqlite.connect(str(get_db_path()), timeout=20.0) as db:
+        await db.execute("PRAGMA journal_mode=WAL;")
+        await db.execute("PRAGMA synchronous=NORMAL;")
         db.row_factory = aiosqlite.Row
         yield db
 
@@ -236,3 +238,34 @@ async def update_auto_post_analyzed(post_id: int, likes: int, replies: int) -> N
             (likes, replies, post_id),
         )
         await db.commit()
+
+
+# ── Maintenance ─────────────────────────────────────────────────────
+
+
+async def cleanup_old_data(days: int = 2) -> dict:
+    """Delete records older than `days` to free up space. Returns counts of deleted rows."""
+    threshold = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    counts = {}
+    async with _connect() as db:
+        # Delete old tweets
+        cursor = await db.execute("DELETE FROM processed_tweets WHERE discovered_at <= ?", (threshold,))
+        counts['processed_tweets'] = cursor.rowcount
+        
+        # Delete old reply history
+        cursor = await db.execute("DELETE FROM reply_history WHERE created_at <= ?", (threshold,))
+        counts['reply_history'] = cursor.rowcount
+        
+        # Delete old activity log
+        cursor = await db.execute("DELETE FROM activity_log WHERE timestamp <= ?", (threshold,))
+        counts['activity_log'] = cursor.rowcount
+        
+        # Delete old auto posts
+        cursor = await db.execute("DELETE FROM auto_posts WHERE created_at <= ?", (threshold,))
+        counts['auto_posts'] = cursor.rowcount
+        
+        await db.commit()
+    
+    return counts

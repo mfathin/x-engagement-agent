@@ -116,7 +116,6 @@ class EngagementAgent:
         self.trend_analyzer: TrendAnalyzer | None = None
         self.skill_manager: SkillManager | None = None
         self.post_mortem: PostMortemAnalyzer | None = None
-        self.current_trend_context: str = ""
         self._shutdown_event = asyncio.Event()
         self._browser_lock = asyncio.Lock()
         # When set, other loops must pause (auto-post is using the browser)
@@ -204,6 +203,7 @@ class EngagementAgent:
                 self._auto_post_loop(),
                 self._trend_analysis_loop(),
                 self._post_mortem_loop(),
+                self._cleanup_loop(),
             )
         except asyncio.CancelledError:
             logger.info("Main loop cancelled")
@@ -381,10 +381,10 @@ class EngagementAgent:
         interval_mins = self.settings.engagement.auto_post_interval_minutes
         logger.info(f"🤖 Auto-post loop starting... Interval: {interval_mins} mins")
         
-        # Wait for trend analysis to complete on startup
-        logger.info("⏳ Waiting for initial trend analysis to finish before first auto-post...")
+        # Wait a bit before first auto-post to let other loops initialize
+        logger.info("⏳ Waiting before first auto-post...")
         for _ in range(180): # Wait up to 3 minutes
-            if self.current_trend_context or self._shutdown_event.is_set():
+            if self._shutdown_event.is_set():
                 break
             await asyncio.sleep(1)
         
@@ -449,12 +449,6 @@ class EngagementAgent:
                 async with self._browser_lock:
                     # Learn niche from timeline
                     await self.trend_analyzer.learn_from_timeline()
-                    # Analyze general trends
-                    new_context = await self.trend_analyzer.analyze_current_trends()
-                
-                if new_context:
-                    self.current_trend_context = new_context
-                    logger.info("✅ Trend context updated successfully.")
 
                 # Wait for interval
                 logger.info(f"⏰ Trend analysis loop sleeping for {interval_hours} hours")
@@ -501,6 +495,39 @@ class EngagementAgent:
                 logger.error(f"Error in post-mortem loop: {e}")
                 await asyncio.sleep(60)
 
+    async def _cleanup_loop(self):
+        """Background loop to periodically delete records older than 2 days to free space."""
+        interval_hours = 24
+        logger.info(f"🧹 Cleanup loop starting... Interval: {interval_hours} hours")
+
+        while not self._shutdown_event.is_set():
+            try:
+                # Wait 5 minutes before the first cleanup to allow agent to start properly
+                await asyncio.sleep(300)
+                
+                logger.info("🧹 Running database cleanup for records older than 2 days...")
+                counts = await db.cleanup_old_data(days=2)
+                
+                total_deleted = sum(counts.values())
+                if total_deleted > 0:
+                    logger.info(f"🧹 Cleanup complete. Deleted {total_deleted} old records: {counts}")
+                    await db.log_activity("cleanup", f"Deleted {total_deleted} old records: {counts}")
+                else:
+                    logger.debug("🧹 Cleanup complete: No old records found.")
+
+                logger.info(f"⏰ Cleanup loop sleeping for {interval_hours} hours")
+                
+                for _ in range(interval_hours * 3600):
+                    if self._shutdown_event.is_set():
+                        return
+                    await asyncio.sleep(1)
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Error in cleanup loop: {e}")
+                await asyncio.sleep(60)
+
     async def _run_homepage_scrape_cycle(self):
         """Run one scrape cycle on the homepage timeline."""
         logger.info("🔄 Starting homepage scrape cycle")
@@ -516,7 +543,9 @@ class EngagementAgent:
             logger.info("📭 No qualifying tweets found on timeline")
             return
 
-        logger.info(f"📬 Found {len(tweets)} tweets on timeline")
+        # Limit to 10 tweets
+        tweets = tweets[:10]
+        logger.info(f"📬 Found {len(tweets)} tweets on timeline to auto-reply")
 
         # Process each tweet
         for tweet in tweets:
@@ -526,7 +555,7 @@ class EngagementAgent:
                 logger.info("⏸️ Rate limit reached")
                 break
 
-            await self._process_tweet(tweet, "Timeline")
+            await self._process_tweet(tweet, "Timeline", auto_reply=True)
             await asyncio.sleep(random.uniform(5, 15))
 
     async def _run_scrape_cycle(self):
@@ -690,10 +719,8 @@ class EngagementAgent:
         combined_context = (
             f"--- KEAHLIAN & NICHE YANG DIPELAJARI (SKILLS.md) ---\n"
             f"{skills}\n\n"
-            f"--- TREN SAAT INI ---\n"
-            f"{self.current_trend_context}"
         )
-        draft, _ = await self.ai.generate_post(combined_context)
+        draft, _ = await self.ai.generate_post(trend_context="", skills_context=combined_context)
         return draft
 
     def _is_active_hours(self) -> bool:

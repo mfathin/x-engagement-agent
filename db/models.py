@@ -98,5 +98,7 @@ async def init_db() -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     async with aiosqlite.connect(str(db_path)) as db:
+        await db.execute("PRAGMA journal_mode=WAL;")
+        await db.execute("PRAGMA synchronous=NORMAL;")
         await db.executescript(_SCHEMA)
         await db.commit()

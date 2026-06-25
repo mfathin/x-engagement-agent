@@ -337,9 +337,15 @@ class TweetScraper:
         try:
             # ── Tweet Text ──────────────────────────────────────────
             try:
-                text_el = article.locator(sel.TWEET_TEXT).first
-                if await text_el.count() > 0:
-                    tweet.tweet_text = (await text_el.inner_text()).strip()
+                text_els = article.locator(sel.TWEET_TEXT)
+                count = await text_els.count()
+                texts = []
+                for i in range(count):
+                    texts.append((await text_els.nth(i).inner_text()).strip())
+                
+                if texts:
+                    # If multiple texts exist, it's likely a Quote Tweet
+                    tweet.tweet_text = " [Mengutip]: ".join(texts)
             except Exception:
                 pass
 

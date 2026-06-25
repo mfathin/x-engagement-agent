@@ -88,7 +88,6 @@ class ReplyGenerator:
                     language=language,
                 )
                 if replies:
-                    replies = [f"{r} - A" for r in replies]
                     logger.info(f"✅ Token Router generated {len(replies)} drafts")
                     return replies, "token_router"
                 else:
@@ -114,14 +113,6 @@ class ReplyGenerator:
 
         logger.error("❌ Token Router failed to generate post draft")
         return "", ""
-
-    async def analyze_trends(self, tweets_text: str) -> str:
-        """Analyze trending tweets."""
-        if self._gemini and self._gemini.is_available():
-            res = await self._gemini.analyze_trends(tweets_text)
-            if res: return res
-        
-        return ""
 
     async def analyze_timeline(self, tweets_text: str) -> str:
         """Analyze timeline tweets to deduce niche."""

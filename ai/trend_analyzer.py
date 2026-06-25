@@ -21,46 +21,6 @@ class TrendAnalyzer:
         self.generator = generator
         self.skill_manager = skill_manager
 
-    async def analyze_current_trends(self) -> str:
-        """
-        Scrape top tweets from the timeline and analyze them with Gemini.
-        Returns a string summarizing the current trend context.
-        """
-        logger.info("📈 Starting trend analysis cycle from Timeline...")
-        
-        try:
-            # 1. Scrape trending tweets from timeline (For You page)
-            tweets = await self.scraper.discover_timeline_tweets()
-            
-            if not tweets:
-                logger.warning("📉 No timeline tweets found to analyze.")
-                return ""
-                
-            logger.info(f"📊 Found {len(tweets)} timeline tweets. Analyzing trends...")
-
-            # Sort by likes to find the most engaging ones from the timeline
-            tweets.sort(key=lambda t: t.likes, reverse=True)
-
-            # 2. Format tweets for the prompt
-            tweets_text = "\n\n".join(
-                [f"Tweet {i+1} (@{t.username}): {t.tweet_text} (Likes: {t.likes})" 
-                 for i, t in enumerate(tweets[:10])] # Take top 10 to fit in context window easily
-            )
-
-            # 3. Analyze with AI (Gemini with Ollama fallback)
-            trend_context = await self.generator.analyze_trends(tweets_text)
-            
-            if trend_context:
-                logger.info(f"✅ Trend analysis successful: {trend_context[:50]}...")
-                return trend_context
-            else:
-                logger.warning("📉 AI failed to return trend context.")
-                return ""
-
-        except Exception as e:
-            logger.error(f"❌ Error during trend analysis: {e}")
-            return ""
-
     async def learn_from_timeline(self) -> None:
         """
         Scrape the user's For You timeline, deduce their overarching niche,

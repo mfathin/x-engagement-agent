@@ -123,25 +123,6 @@ class GeminiProvider:
             logger.error(f"Gemini API error generating post: {e}")
             return ""
 
-    async def analyze_trends(self, tweets_text: str) -> str:
-        """Analyze trending tweets and extract a summary."""
-        from ai.prompts import TREND_ANALYSIS_PROMPT
-        try:
-            client = self._get_client()
-            import asyncio
-            prompt = TREND_ANALYSIS_PROMPT.format(tweets=tweets_text)
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=self.model,
-                contents=prompt,
-            )
-            if not response or not response.text:
-                return ""
-            return response.text.strip()
-        except Exception as e:
-            logger.error(f"Gemini API error analyzing trends: {e}")
-            return ""
-
     async def analyze_timeline(self, tweets_text: str) -> str:
         """Analyze timeline tweets to deduce niche."""
         from ai.prompts import TIMELINE_ANALYSIS_PROMPT

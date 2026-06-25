@@ -65,7 +65,7 @@ class TokenRouterConfig:
     enabled: bool = False
     url: str = "https://api.tokenrouter.com/v1"
     api_key: str = ""
-    model: str = "minimax-m3"
+    model: str = "MiniMax-M3"
 
 
 @dataclass
@@ -147,7 +147,7 @@ class Settings:
             enabled=_get_bool("TOKEN_ROUTER_ENABLED"),
             url=_get("TOKEN_ROUTER_URL", "https://api.tokenrouter.com/v1"),
             api_key=_get("TOKEN_ROUTER_API_KEY"),
-            model=_get("TOKEN_ROUTER_MODEL", "minimax-m3"),
+            model=_get("TOKEN_ROUTER_MODEL", "MiniMax-M3"),
         )
 
         # Twitter
