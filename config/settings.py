@@ -73,7 +73,7 @@ class OmnirouteConfig:
     enabled: bool = False
     url: str = "https://openrouter.ai/api/v1"
     api_key: str = ""
-    model: str = "openai/codex"
+    model: str = "openai/gpt-5.3-codex"
 
 
 @dataclass
@@ -164,7 +164,7 @@ class Settings:
             enabled=_get_bool("OMNIROUTE_ENABLED"),
             url=_get("OMNIROUTE_URL", "https://openrouter.ai/api/v1"),
             api_key=_get("OMNIROUTE_API_KEY"),
-            model=_get("OMNIROUTE_MODEL", "openai/codex"),
+            model=_get("OMNIROUTE_MODEL", "openai/gpt-5.3-codex"),
         )
 
         # Twitter
