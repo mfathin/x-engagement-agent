@@ -71,9 +71,9 @@ class TokenRouterConfig:
 @dataclass
 class OmnirouteConfig:
     enabled: bool = False
-    url: str = "https://openrouter.ai/api/v1"
+    url: str = "http://localhost:20128/v1"
     api_key: str = ""
-    model: str = "openai/gpt-5.3-codex"
+    model: str = "openai/codex"
 
 
 @dataclass
@@ -162,9 +162,9 @@ class Settings:
         # Omniroute
         self.omniroute = OmnirouteConfig(
             enabled=_get_bool("OMNIROUTE_ENABLED"),
-            url=_get("OMNIROUTE_URL", "https://openrouter.ai/api/v1"),
+            url=_get("OMNIROUTE_URL", "http://localhost:20128/v1"),
             api_key=_get("OMNIROUTE_API_KEY"),
-            model=_get("OMNIROUTE_MODEL", "openai/gpt-5.3-codex"),
+            model=_get("OMNIROUTE_MODEL", "openai/codex"),
         )
 
         # Twitter
