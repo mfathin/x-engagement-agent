@@ -28,6 +28,7 @@ class ReplyGenerator:
         self.settings = settings
         self._gemini: Optional[GeminiProvider] = None
         self._token_router: Optional[TokenRouterProvider] = None
+        self._omniroute: Optional[TokenRouterProvider] = None
 
         # Initialize enabled providers
         if settings.gemini.enabled:
@@ -44,6 +45,14 @@ class ReplyGenerator:
                 model=settings.token_router.model,
             )
             logger.info(f"Token Router provider enabled (model: {settings.token_router.model})")
+
+        if settings.omniroute.enabled:
+            self._omniroute = TokenRouterProvider(
+                url=settings.omniroute.url,
+                api_key=settings.omniroute.api_key,
+                model=settings.omniroute.model,
+            )
+            logger.info(f"Omniroute provider enabled (model: {settings.omniroute.model})")
 
     async def generate(
         self,
@@ -76,6 +85,25 @@ class ReplyGenerator:
             logger.warning("Cannot generate replies for empty tweet text")
             return [], ""
 
+        # --- Use Omniroute ---
+        if self._omniroute:
+            if await self._omniroute.is_available():
+                logger.info("Attempting reply generation with Omniroute...")
+                replies = await self._omniroute.generate_replies(
+                    tweet_text=tweet_text,
+                    username=username,
+                    display_name=display_name,
+                    topic=topic,
+                    language=language,
+                )
+                if replies:
+                    logger.info(f"✅ Omniroute generated {len(replies)} drafts")
+                    return replies, "omniroute"
+                else:
+                    logger.warning("Omniroute also failed to generate replies")
+            else:
+                logger.warning("Omniroute server not available for fallback")
+
         # --- Use Token Router Only ---
         if self._token_router:
             if await self._token_router.is_available():
@@ -96,7 +124,7 @@ class ReplyGenerator:
                 logger.warning("Token Router server not available for fallback")
 
         # --- Failed ---
-        logger.error("❌ Token Router failed to generate replies")
+        logger.error("❌ All fallback providers failed to generate replies")
         return [], ""
 
     async def generate_post(self, trend_context: str = "", skills_context: str = "") -> tuple[str, str]:
@@ -104,6 +132,13 @@ class ReplyGenerator:
         Generate a single auto-post draft.
         Returns (draft_text, provider_name). Returns ("", "") on failure.
         """
+        if self._omniroute and await self._omniroute.is_available():
+            if hasattr(self._omniroute, "generate_post"):
+                logger.info("Attempting post generation with Omniroute...")
+                draft = await self._omniroute.generate_post(trend_context, skills_context)
+                if draft:
+                    return draft, "omniroute"
+
         if self._token_router and await self._token_router.is_available():
             if hasattr(self._token_router, "generate_post"):
                 logger.info("Attempting post generation with Token Router...")
@@ -111,7 +146,7 @@ class ReplyGenerator:
                 if draft:
                     return draft, "token_router"
 
-        logger.error("❌ Token Router failed to generate post draft")
+        logger.error("❌ All providers failed to generate post draft")
         return "", ""
 
     async def analyze_timeline(self, tweets_text: str) -> str:
@@ -143,5 +178,10 @@ class ReplyGenerator:
             status["token_router"] = await self._token_router.is_available()
         else:
             status["token_router"] = False
+
+        if self._omniroute:
+            status["omniroute"] = await self._omniroute.is_available()
+        else:
+            status["omniroute"] = False
 
         return status

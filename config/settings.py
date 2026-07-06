@@ -69,6 +69,14 @@ class TokenRouterConfig:
 
 
 @dataclass
+class OmnirouteConfig:
+    enabled: bool = False
+    url: str = "https://openrouter.ai/api/v1"
+    api_key: str = ""
+    model: str = "openai/codex"
+
+
+@dataclass
 class TwitterConfig:
     auth_token: str = ""
 
@@ -118,6 +126,7 @@ class Settings:
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
     token_router: TokenRouterConfig = field(default_factory=TokenRouterConfig)
+    omniroute: OmnirouteConfig = field(default_factory=OmnirouteConfig)
     twitter: TwitterConfig = field(default_factory=TwitterConfig)
     engagement: EngagementConfig = field(default_factory=EngagementConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
@@ -148,6 +157,14 @@ class Settings:
             url=_get("TOKEN_ROUTER_URL", "https://api.tokenrouter.com/v1"),
             api_key=_get("TOKEN_ROUTER_API_KEY"),
             model=_get("TOKEN_ROUTER_MODEL", "MiniMax-M3"),
+        )
+
+        # Omniroute
+        self.omniroute = OmnirouteConfig(
+            enabled=_get_bool("OMNIROUTE_ENABLED"),
+            url=_get("OMNIROUTE_URL", "https://openrouter.ai/api/v1"),
+            api_key=_get("OMNIROUTE_API_KEY"),
+            model=_get("OMNIROUTE_MODEL", "openai/codex"),
         )
 
         # Twitter
@@ -205,10 +222,10 @@ class Settings:
         if self.gemini.enabled and not self.gemini.api_key:
             errors.append("GEMINI_API_KEY is required when GEMINI_ENABLED=true")
 
-        if not self.gemini.enabled and not self.token_router.enabled:
+        if not self.gemini.enabled and not self.token_router.enabled and not self.omniroute.enabled:
             errors.append(
                 "At least one AI provider must be enabled "
-                "(GEMINI_ENABLED or TOKEN_ROUTER_ENABLED)"
+                "(GEMINI_ENABLED, TOKEN_ROUTER_ENABLED, or OMNIROUTE_ENABLED)"
             )
 
         if not self.engagement.queries:
