@@ -33,7 +33,8 @@ class TokenRouterProvider:
         payload = {
             "model": self.model,
             "messages": messages,
-            "temperature": temperature
+            "temperature": temperature,
+            "stream": False
         }
         
         endpoint = f"{self.url}/chat/completions"
